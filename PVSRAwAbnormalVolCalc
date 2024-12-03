@@ -1,0 +1,76 @@
+//@version=6
+indicator(title="PVSRA Volume Suite Combined", shorttitle="PVSRA_VS_Combo", overlay=false)
+
+// --- PVSRA Volume Suite ---
+// Inputs
+bool overridesym = input(title='Override chart symbol?', defval=false)
+string pvsra_sym = input.symbol(title='Symbol', defval='INDEX:BTCUSD')
+bool setcandlecolors = input(false, title='Set PVSRA candle colors?')
+
+// Security function
+pvsra_security(sresolution, sseries) =>
+    request.security(overridesym ? pvsra_sym : syminfo.tickerid, sresolution, sseries[barstate.isrealtime ? 1 : 0], barmerge.gaps_off, barmerge.lookahead_off)
+
+pvsra_volume = overridesym ? pvsra_security('', volume) : volume
+pvsra_high = overridesym ? pvsra_security('', high) : high
+pvsra_low = overridesym ? pvsra_security('', low) : low
+pvsra_close = overridesym ? pvsra_security('', close) : close
+pvsra_open = overridesym ? pvsra_security('', open) : open
+
+// Calculations
+sum_1 = math.sum(pvsra_volume, 10)
+sum_2 = math.sum(volume, 10)
+av = overridesym ? sum_1 / 10 : sum_2 / 10
+value2 = overridesym ? pvsra_volume * (pvsra_high - pvsra_low) : volume * (high - low)
+hivalue2 = ta.highest(value2, 10)
+
+// Volume Analysis (VA)
+iff_1 = pvsra_volume >= av * 1.5 ? 2 : 0
+iff_2 = pvsra_volume >= av * 2 or value2 >= hivalue2 ? 1 : iff_1
+iff_3 = volume >= av * 1.5 ? 2 : 0
+iff_4 = volume >= av * 2 or value2 >= hivalue2 ? 1 : iff_3
+va = overridesym ? iff_2 : iff_4
+
+// Bullish or Bearish coloring
+isBull = overridesym ? pvsra_close > pvsra_open : close > open
+
+CUColor = color.lime
+CDColor = color.red
+AUColor = color.blue
+ADColor = color.fuchsia
+NUColor = #999999
+NDColor = #4d4d4d
+
+// Candle Colors
+iff_5 = va == 2 ? AUColor : NUColor
+iff_6 = va == 1 ? CUColor : iff_5
+iff_7 = va == 2 ? ADColor : NDColor
+iff_8 = va == 1 ? CDColor : iff_7
+candleColor = isBull ? iff_6 : iff_8
+barcolor(setcandlecolors ? candleColor : na)
+
+plot(pvsra_volume, style=plot.style_columns, linewidth=1, color=candleColor)
+
+// --- Dynamic Abnormal Volume Threshold ---
+// Inputs
+adv = input.int(3300000, title="Average Daily Volume (ADV)")
+
+// Function to calculate abnormal threshold
+calculate_abnormal_threshold(adv, interval_minutes) =>
+    k = 2.26 + 0.34 * math.log(adv)                    // Scaling factor k
+    per_interval_volume = adv / (1440 / interval_minutes) // Per-timeframe volume
+    k * per_interval_volume                             // Abnormal threshold
+
+// Timeframe adjustment
+interval_minutes = timeframe.in_seconds() / 60  // Convert current timeframe to minutes
+
+// Calculation
+abnormal_threshold = calculate_abnormal_threshold(adv, interval_minutes)
+adjusted_threshold = math.max(abnormal_threshold, 1) // Prevent the value from becoming zero or negative
+
+// --- Plotting only the redline ---
+plot(adjusted_threshold, title="Abnormal Threshold", color=color.red, linewidth=2)
+
+// Alert Conditions
+alertcondition(va > 0, title='Alert on Vector Candle', message='{{ticker}} Vector Candle on the {{interval}}')
+alertcondition(volume > abnormal_threshold, title="Abnormal Volume Alert", message="Abnormal volume detected!")
